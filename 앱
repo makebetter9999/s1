@@ -1,0 +1,171 @@
+import React, { useState, useEffect } from "react";
+import { View, Text, Button, TextInput, StyleSheet, FlatList } from "react-native";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc, query, onSnapshot, updateDoc, doc, setDoc, getDoc } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_STORAGE_BUCKET",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const StudyTimer = () => {
+  const [isStudying, setIsStudying] = useState(false);
+  const [startTime, setStartTime] = useState(null);
+  const [totalStudyTime, setTotalStudyTime] = useState(0);
+  const [users, setUsers] = useState([]);
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [loggedInUser, setLoggedInUser] = useState(null);
+
+  useEffect(() => {
+    const q = query(collection(db, "study_sessions"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let total = 0;
+      snapshot.forEach((doc) => {
+        total += doc.data().duration;
+      });
+      setTotalStudyTime(total);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const usersQuery = query(collection(db, "users"));
+    const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
+      const userList = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      setUsers(userList);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const autoLogin = async () => {
+      const savedUserId = localStorage.getItem("userId");
+      if (savedUserId) {
+        const userRef = doc(db, "users", savedUserId);
+        const docSnap = await getDoc(userRef);
+        if (docSnap.exists()) {
+          setLoggedInUser(docSnap.data());
+        }
+      }
+    };
+    autoLogin();
+  }, []);
+
+  const register = async () => {
+    const userRef = doc(db, "users", userId);
+    const docSnap = await getDoc(userRef);
+    if (docSnap.exists()) {
+      alert("User ID already exists");
+    } else {
+      await setDoc(userRef, { password, nickname, studying: false });
+      alert("Registration successful!");
+    }
+  };
+
+  const login = async () => {
+    const userRef = doc(db, "users", userId);
+    const docSnap = await getDoc(userRef);
+    if (docSnap.exists() && docSnap.data().password === password) {
+      setLoggedInUser(docSnap.data());
+      localStorage.setItem("userId", userId);
+      alert("Login successful!");
+    } else {
+      alert("Invalid credentials");
+    }
+  };
+
+  const startStudy = async () => {
+    setIsStudying(true);
+    setStartTime(Date.now());
+    await updateDoc(doc(db, "users", userId), { studying: true });
+  };
+
+  const stopStudy = async () => {
+    if (startTime) {
+      const duration = (Date.now() - startTime) / 1000;
+      await addDoc(collection(db, "study_sessions"), {
+        duration,
+        timestamp: new Date()
+      });
+      setIsStudying(false);
+      setStartTime(null);
+      await updateDoc(doc(db, "users", userId), { studying: false });
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      {!loggedInUser ? (
+        <View>
+          <Text style={styles.header}>습관이 모여 하루를 만들고, 하루가 모여 미래를 만든다</Text>
+          <TextInput placeholder="User ID" value={userId} onChangeText={setUserId} style={styles.input} />
+          <TextInput placeholder="Password" value={password} onChangeText={setPassword} style={styles.input} secureTextEntry />
+          <TextInput placeholder="Nickname (for registration)" value={nickname} onChangeText={setNickname} style={styles.input} />
+          <Button title="Register" onPress={register} color="#fff" />
+          <Button title="Login" onPress={login} color="#fff" />
+        </View>
+      ) : (
+        <View>
+          <Text style={styles.header}>Welcome, {loggedInUser.nickname}</Text>
+          <Text style={styles.text}>Total Study Time: {totalStudyTime} seconds</Text>
+          {isStudying ? (
+            <Button title="Stop Studying" onPress={stopStudy} color="#fff" />
+          ) : (
+            <Button title="Start Studying" onPress={startStudy} color="#fff" />
+          )}
+          <Text style={styles.subHeader}>Group Study Status</Text>
+          <FlatList
+            data={users}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <Text style={styles.userText}>{item.nickname}: {item.studying ? "🟢 Studying" : "⚪ Not Studying"}</Text>
+            )}
+          />
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#001F3F",
+  },
+  header: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#FFFFFF",
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  text: {
+    fontSize: 18,
+    color: "#FFFFFF",
+    marginBottom: 20,
+  },
+  input: {
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    marginVertical: 5,
+    width: 200,
+    borderRadius: 5,
+  },
+  userText: {
+    fontSize: 16,
+    color: "#FFFFFF",
+  }
+});
+
+export default StudyTimer;
